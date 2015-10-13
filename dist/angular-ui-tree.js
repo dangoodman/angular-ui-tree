@@ -153,31 +153,32 @@
           return 1;
         };
 
-        var subDepth = 0;
-        function countSubDepth(scope) {
-          var i, childNodes,
-              count = 0,
-              nodes = scope.childNodes();
-
-          for (i = 0; i < nodes.length; i++) {
-            childNodes = nodes[i].$childNodesScope;
-
-            if (childNodes && childNodes.childNodesCount() > 0) {
-              count = 1;
-              countSubDepth(childNodes);
-            }
+        /**
+        * Returns the depth of the deepest subtree under this node
+        * @param scope a TreeNodesController scope object
+        * @returns Depth of all nodes *beneath* this node. If scope belongs to a leaf node, the
+        *   result is 0 (it has no subtree).
+        */
+        function countSubTreeDepth(scope) {
+          var thisLevelDepth = 0,
+              childNodes = scope.childNodes(),
+              childNode,
+              childDepth,
+              i;
+          if (!childNodes || childNodes.length === 0) {
+            return 0;
           }
-          subDepth += count;
+          for (i = childNodes.length - 1; i >= 0 ; i--) {
+            childNode = childNodes[i],
+            childDepth = 1 + countSubTreeDepth(childNode);
+            thisLevelDepth = Math.max(thisLevelDepth, childDepth);
+          }
+          return thisLevelDepth;
         }
 
         $scope.maxSubDepth = function () {
-          subDepth = 0;
-          if ($scope.$childNodesScope) {
-            countSubDepth($scope.$childNodesScope);
-          }
-          return subDepth;
+          return $scope.$childNodesScope ? countSubTreeDepth($scope.$childNodesScope) : 0;
         };
-
       }
     ]);
 })();
@@ -386,8 +387,8 @@
               scope.$emptyElm.addClass(config.emptyTreeClass);
             }
 
-            scope.$watch('$nodesScope.$modelValue.length', function () {
-              if (!scope.$nodesScope.$modelValue) {
+            scope.$watch('$nodesScope.$modelValue.length', function (val) {
+              if (!angular.isNumber(val)) {
                 return;
               }
 
@@ -519,8 +520,8 @@
 
   angular.module('ui.tree')
 
-    .directive('uiTreeNode', ['treeConfig', 'UiTreeHelper', '$window', '$document', '$timeout',
-      function (treeConfig, UiTreeHelper, $window, $document, $timeout) {
+    .directive('uiTreeNode', ['treeConfig', 'UiTreeHelper', '$window', '$document', '$timeout', '$rootElement',
+      function (treeConfig, UiTreeHelper, $window, $document, $timeout, $rootElement) {
         return {
           require: ['^uiTreeNodes', '^uiTree'],
           restrict: 'A',
@@ -551,7 +552,8 @@
               dragDelay,
               bindDrag,
               keydownHandler,
-              outOfBounds;
+              outOfBounds,
+              i;
             angular.extend(config, treeConfig);
             if (config.nodeClass) {
               element.addClass(config.nodeClass);
@@ -629,18 +631,15 @@
               firstMoving = true;
               dragInfo = UiTreeHelper.dragInfo(scope);
 
-              // Fire dragStart callback
-              scope.$apply(function () {
-                scope.$treeScope.$callbacks.dragStart(dragInfo.eventArgs(elements, pos));
-              });
-
               tagName = scope.$element.prop('tagName');
 
               if (tagName.toLowerCase() === 'tr') {
-                placeElm = angular.element($window.document.createElement(tagName));
-                tdElm = angular.element($window.document.createElement('td'))
+                placeElm = angular.element($window.document.createElement(tagName))
                   .addClass(config.placeholderClass);
-                placeElm.append(tdElm);
+                for (i = 0; i < scope.$element[0].children.length; i++) {
+                  tdElm = angular.element($window.document.createElement('td'));
+                  placeElm.append(tdElm);
+                }
               } else {
                 placeElm = angular.element($window.document.createElement(tagName))
                   .addClass(config.placeholderClass);
@@ -676,7 +675,9 @@
               } else {
                 dragElm.append(scope.$element);
               }
-              $document.find('body').append(dragElm);
+
+              $rootElement.append(dragElm);
+
               dragElm.css({
                 'left': eventObj.pageX - pos.offsetX + 'px',
                 'top': eventObj.pageY - pos.offsetY + 'px'
@@ -685,6 +686,11 @@
                 placeholder: placeElm,
                 dragging: dragElm
               };
+
+              // Fire dragStart callback
+              scope.$apply(function () {
+                scope.$treeScope.$callbacks.dragStart(dragInfo.eventArgs(elements, pos));
+              });
 
               angular.element($document).bind('touchend', dragEndEvent);
               angular.element($document).bind('touchcancel', dragEndEvent);
@@ -854,7 +860,8 @@
                   }
 
                   // Show the placeholder if it was hidden for nodrop-enabled and this is a new tree
-                  if (targetNode.$treeScope && !targetNode.$parent.nodropEnabled && !targetNode.$treeScope.nodropEnabled) {
+                  if (targetNode.$treeScope && !targetNode.$parent.nodropEnabled
+                    && !targetNode.$treeScope.nodropEnabled && placeElm.prop('tagName').toLowerCase() !== 'tr') {
                     placeElm.css('display', 'block');
                   }
 
